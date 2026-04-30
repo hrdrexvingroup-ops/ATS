@@ -1,15 +1,62 @@
 // ========== GROQ API ==========
 let GROQ_API_KEY = localStorage.getItem('groq_api_key') || '';
 
-function saveApiKey() {
+// Fungsi notifikasi
+function showNotification(msg, isError = false) {
+    const statusDiv = document.getElementById('apiStatus');
+    if (statusDiv) {
+        statusDiv.innerHTML = isError ? `❌ ${msg}` : `✅ ${msg}`;
+        statusDiv.style.color = isError ? '#dc2626' : '#10b981';
+        setTimeout(() => {
+            if (statusDiv.innerHTML === `✅ ${msg}` || statusDiv.innerHTML === `❌ ${msg}`) 
+                statusDiv.innerHTML = '';
+        }, 5000);
+    } else {
+        alert(msg);
+    }
+}
+
+// Test koneksi API Key
+async function testGroqConnection(apiKey) {
+    try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',  // model yang lebih stabil
+                messages: [{ role: 'user', content: 'OK' }],
+                max_tokens: 5
+            })
+        });
+        if (res.ok) {
+            showNotification('API Key Groq valid dan terhubung!');
+            return true;
+        } else {
+            const err = await res.json();
+            showNotification(`API Key gagal: ${err.error?.message || 'Invalid key'}`, true);
+            return false;
+        }
+    } catch (e) {
+        showNotification(`Gagal connect: ${e.message}`, true);
+        return false;
+    }
+}
+
+async function saveApiKey() {
     const key = document.getElementById('apiKey').value.trim();
-    if (!key) return alert('Masukkan API Key');
-    if (!key.startsWith('gsk_')) return alert('API Key Groq biasanya diawali "gsk_". Cek kembali.');
-    GROQ_API_KEY = key;
-    localStorage.setItem('groq_api_key', key);
-    document.getElementById('apiStatus').innerHTML = '✓ API Key tersimpan';
-    document.getElementById('apiStatus').style.color = '#10b981';
-    setTimeout(() => document.getElementById('apiStatus').innerHTML = '', 3000);
+    if (!key) {
+        showNotification('Masukkan API Key', true);
+        return;
+    }
+    showNotification('Menguji koneksi...');
+    const isValid = await testGroqConnection(key);
+    if (isValid) {
+        GROQ_API_KEY = key;
+        localStorage.setItem('groq_api_key', key);
+    }
 }
 
 // ========== BACA CV ==========
@@ -17,145 +64,95 @@ async function readCV(file) {
     const ext = file.name.split('.').pop().toLowerCase();
     try {
         if (ext === 'pdf') {
-            return await readPDF(file);
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let fullText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                fullText += content.items.map(item => item.str).join(' ') + '\n';
+            }
+            return fullText;
         } else if (ext === 'docx' || ext === 'doc') {
-            return await readDOCX(file);
-        } else {
-            return '';
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await mammoth.extractRawText({ arrayBuffer });
+            return result.value;
         }
+        return '';
     } catch(e) {
         console.error(e);
         return '';
     }
 }
 
-async function readPDF(file) {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let fullText = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map(item => item.str);
-        fullText += strings.join(' ') + '\n';
-    }
-    return fullText;
-}
-
-async function readDOCX(file) {
-    const arrayBuffer = await file.arrayBuffer();
-    const result = await mammoth.extractRawText({ arrayBuffer });
-    return result.value;
-}
-
-// ========== EKSTRAKSI DATA DARI TEXT CV (LEBIH CERDAS) ==========
+// ========== EKSTRAKSI DATA CV ==========
 function parseCV(text) {
     if (!text) return { name: '-', age: '-', education: '-', major: '-', address: '-', experience: '-' };
+    const clean = text.replace(/\s+/g, ' ').trim();
+    const lower = clean.toLowerCase();
     
-    // Bersihkan teks: hapus karakter aneh, ganti newline dengan spasi
-    let clean = text.replace(/[\n\r\t]+/g, ' ').replace(/\s+/g, ' ');
+    let name = 'Tidak terdeteksi';
+    const nameMatch = clean.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/);
+    if (nameMatch) name = nameMatch[1];
     
-    // NAMA: cari pola Nama: atau nama besar di awal, atau setelah "Nama", "Curriculum Vitae", dll
-    let name = '-';
-    // Cari "Nama : ..." atau "Nama ..."
-    let nameMatch = clean.match(/Nama\s*:\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,4})/i);
-    if (!nameMatch) nameMatch = clean.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/);
-    if (nameMatch) name = nameMatch[1].trim();
-    // Jika masih gagal, coba ambil kata setelah "CV" atau "CURRICULUM VITAE"
-    if (name === '-') {
-        let cvMatch = clean.match(/CURRICULUM VITAE\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/i);
-        if (cvMatch) name = cvMatch[1];
-    }
-    
-    // USIA: cari angka diikuti tahun/tahun/thn
     let age = '-';
-    let ageMatch = clean.match(/\b(\d{1,2})\s*(tahun|thn|t)\b/i);
+    const ageMatch = clean.match(/\b(\d{1,2})\s*(tahun|thn|t)\b/i);
     if (ageMatch) age = ageMatch[1];
-    // cari juga "Usia : XX"
-    let usiaMatch = clean.match(/usia\s*:\s*(\d{1,2})/i);
-    if (usiaMatch) age = usiaMatch[1];
     
-    // PENDIDIKAN: cari S1, S2, D3, SMA
     let edu = '-';
-    if (/\bS2\b|\bMagister\b/i.test(clean)) edu = 'S2';
-    else if (/\bS1\b|\bSarjana\b/i.test(clean)) edu = 'S1';
-    else if (/\bD4\b/i.test(clean)) edu = 'D4';
-    else if (/\bD3\b/i.test(clean)) edu = 'D3';
-    else if (/\bSMA\b|\bSekolah Menengah Atas\b/i.test(clean)) edu = 'SMA';
-    else if (/\bSMK\b/i.test(clean)) edu = 'SMK';
+    if (lower.includes('s2') || lower.includes('magister')) edu = 'S2';
+    else if (lower.includes('s1') || lower.includes('sarjana')) edu = 'S1';
+    else if (lower.includes('d3')) edu = 'D3';
+    else if (lower.includes('sma')) edu = 'SMA';
     
-    // JURUSAN: cari "Jurusan", "Teknik", "Manajemen", dll
     let major = '-';
-    let jurusanMatch = clean.match(/jurusan\s*:?\s*([A-Za-z\s]+?)(?=\.|\d|$)/i);
-    if (jurusanMatch) major = jurusanMatch[1].trim().substring(0, 30);
-    else {
-        if (clean.includes('Teknik Sipil')) major = 'Teknik Sipil';
-        else if (clean.includes('Manajemen')) major = 'Manajemen';
-        else if (clean.includes('Akuntansi')) major = 'Akuntansi';
-        else if (clean.includes('Informatika')) major = 'Informatika';
-    }
+    const jurusan = ['teknik sipil', 'akuntansi', 'manajemen', 'informatika', 'hukum'];
+    for (let j of jurusan) if (lower.includes(j)) { major = j.toUpperCase(); break; }
     
-    // ALAMAT: cari "Alamat : ..." atau pola jalan
     let address = '-';
-    let alamatMatch = clean.match(/alamat\s*:?\s*([^,]+(?:jalan|jl\.|perum|kavling)[^,]+)/i);
-    if (alamatMatch) address = alamatMatch[1].trim().substring(0, 50);
-    // cari juga kota
-    let kotaMatch = clean.match(/\b(Batam|Jakarta|Bandung|Surabaya|Medan|Padang|Balikpapan)\b/i);
-    if (kotaMatch && address === '-') address = kotaMatch[1];
+    const addrMatch = clean.match(/alamat\s*:?\s*([^,\n]+)/i);
+    if (addrMatch) address = addrMatch[1].trim().substring(0, 50);
     
-    // RINGKASAN PENGALAMAN: ambil nama perusahaan dan tahun
-    let experience = '-';
-    // pola: Nama Perusahaan (tahun - tahun) atau tahun - tahun Nama Perusahaan
-    let expRegex = /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[\(]?(\d{4})\s*[-–]\s*(\d{4}|sekarang)[\)]?/gi;
+    let expSummary = '-';
+    const expRegex = /([A-Z][a-z\s&]+(?:PT\.?|CV\.?)?)\s*(\d{4})\s*[-–]\s*(\d{4}|sekarang)/gi;
     let matches = [...clean.matchAll(expRegex)];
     if (matches.length) {
-        experience = matches.slice(0, 2).map(m => `${m[1]} (${m[2]}–${m[3]})`).join('; ');
+        expSummary = matches.slice(0,2).map(m => `${m[1].trim()} (${m[2]}–${m[3]})`).join('; ');
     } else {
-        // fallback: ambil kalimat mengandung "pengalaman" atau "bekerja"
-        let expIndex = clean.search(/pengalaman|bekerja|pernah|sebagai/i);
-        if (expIndex !== -1 && expIndex < 800) {
-            experience = clean.substring(expIndex, expIndex+150).trim();
-        }
+        const idx = lower.indexOf('pengalaman');
+        if (idx !== -1) expSummary = clean.substring(idx, idx+120).replace(/\n/g,' ');
     }
-    
-    return { name, age, education: edu, major, address, experience: experience.substring(0, 120) };
+    return { name, age, education: edu, major, address, experience: expSummary };
 }
 
-// ========== ANALISIS KECOCOKAN VIA GROQ (WAJIB API) ==========
-async function getMatchScore(cvText, jobTitle, qualification, jobdesc, candidateName) {
-    // Jika tidak ada API key, beri pesan error dan return 0
+// ========== ANALISIS KECOCOKAN PAKAI GROQ ==========
+async function getMatchScore(cvText, jobTitle, qualification, jobdesc) {
     if (!GROQ_API_KEY) {
-        console.warn('GROQ API KEY MISSING');
-        return { score: 0, reason: 'API Key belum disimpan' };
+        showNotification('⚠️ API Key belum disimpan. Skor perkiraan saja.', true);
+        // fallback keyword
+        const requirement = (qualification + ' ' + jobdesc).toLowerCase();
+        const cv = cvText.toLowerCase();
+        const keywords = requirement.split(/\s+/).filter(w => w.length > 4);
+        let match = 0;
+        keywords.forEach(k => { if(cv.includes(k)) match++; });
+        let score = keywords.length ? Math.min(95, Math.max(40, Math.round((match/keywords.length)*100))) : 55;
+        return { score, reason: 'Lokal (tanpa API)' };
     }
     
-    // Potong CV terlalu panjang (max 3000 karakter)
-    const trimmedCV = cvText.length > 2800 ? cvText.substring(0, 2800) + '...' : cvText;
+    const prompt = `Bandingkan CV ini dengan requirement:
+Job Title: ${jobTitle}
+Kualifikasi: ${qualification}
+Jobdesc: ${jobdesc}
+
+CV:
+${cvText.substring(0, 2500)}
+
+Output HARUS:
+Score: (0-100)
+Alasan: (singkat)`;
     
-    const prompt = `Anda adalah HRD profesional. Berikan skor kesesuaian (0-100) untuk kandidat berikut.
-
-POSISI: ${jobTitle}
-KUALIFIKASI YANG DIBUTUHKAN:
-${qualification}
-
-JOB DESCRIPTION:
-${jobdesc}
-
-CV KANDIDAT (${candidateName}):
-${trimmedCV}
-
-INSTRUKSI KETAT:
-1. Berikan output HANYA dalam format JSON di bawah ini, TIDAK ADA TEKS LAIN:
-{
-  "score": (angka 0-100),
-  "reason": "alasan singkat maksimal 50 kata"
-}
-2. Score harus berdasarkan: pendidikan (20%), pengalaman kerja (30%), skill match (30%), kesesuaian industri (20%).
-3. Jika CV tidak terbaca atau kosong, score = 20 dengan reason "CV tidak terbaca".
-4. JANGAN tambahkan kata pengantar atau penjelasan di luar JSON.`;
-
     try {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -164,161 +161,102 @@ INSTRUKSI KETAT:
             body: JSON.stringify({
                 model: 'llama-3.3-70b-versatile',
                 messages: [{ role: 'user', content: prompt }],
-                temperature: 0.1,
-                max_tokens: 300
+                temperature: 0.2,
+                max_tokens: 150
             })
         });
-        
-        const data = await response.json();
-        if (!response.ok) {
-            console.error('Groq API Error:', data);
-            return { score: 0, reason: `API Error: ${data.error?.message || 'Unknown'}` };
+        if (!res.ok) {
+            const err = await res.json();
+            showNotification(`Groq error: ${err.error?.message}`, true);
+            return { score: 50, reason: 'API error' };
         }
-        
-        const reply = data.choices?.[0]?.message?.content || '';
-        console.log('Groq reply:', reply);
-        
-        // Parse JSON dari reply
-        let jsonMatch = reply.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) return { score: 0, reason: 'Format API salah' };
-        
-        const result = JSON.parse(jsonMatch[0]);
-        let score = parseInt(result.score) || 0;
+        const data = await res.json();
+        const reply = data.choices[0].message.content;
+        const scoreMatch = reply.match(/Score:\s*(\d+)/i);
+        let score = scoreMatch ? parseInt(scoreMatch[1]) : 50;
         score = Math.min(100, Math.max(0, score));
-        return { score, reason: result.reason || '-' };
-        
+        const reasonMatch = reply.match(/Alasan:\s*(.*)/is);
+        const reason = reasonMatch ? reasonMatch[1].substring(0,100) : '';
+        return { score, reason };
     } catch(e) {
-        console.error('Groq exception:', e);
-        return { score: 0, reason: 'Gagal koneksi ke Groq' };
+        console.error(e);
+        showNotification(`Gagal koneksi Groq: ${e.message}`, true);
+        return { score: 50, reason: 'Koneksi gagal' };
     }
 }
 
-// ========== VARIABEL GLOBAL ==========
+// ========== MAIN ANALISIS ==========
 let allResults = [];
 
-// ========== ANALISIS UTAMA ==========
 async function startAnalysis() {
     const jobTitle = document.getElementById('jobTitle').value.trim();
-    const department = document.getElementById('department').value.trim();
     const qualification = document.getElementById('qualification').value.trim();
     const jobdesc = document.getElementById('jobdesc').value.trim();
     const files = document.getElementById('cvFiles').files;
     
-    if (!jobTitle || !qualification || !jobdesc) {
-        alert('Lengkapi Nama Posisi, Kualifikasi, dan Job Description');
-        return;
-    }
-    if (files.length === 0) {
-        alert('Upload minimal 1 CV');
-        return;
-    }
-    if (!GROQ_API_KEY) {
-        alert('⚠️ Groq API Key belum disimpan. Masukkan API Key di bagian atas, lalu klik Simpan Key.\n\nJika tidak punya, daftar gratis di console.groq.com');
-        return;
-    }
+    if (!jobTitle || !qualification || !jobdesc) return alert('Lengkapi semua data');
+    if (!files.length) return alert('Upload CV');
+    
+    if (!GROQ_API_KEY) showNotification('API Key belum disimpan, skor kurang akurat', true);
+    else showNotification('Menggunakan Groq API...');
     
     document.getElementById('loading').style.display = 'block';
     document.getElementById('resultCard').style.display = 'none';
     allResults = [];
     
-    let successCount = 0;
     for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        console.log(`Processing ${file.name}...`);
-        const fileText = await readCV(file);
-        if (!fileText || fileText.length < 50) {
-            console.warn(`Gagal baca ${file.name}`);
-            allResults.push({
-                name: file.name.replace(/\.(pdf|docx?)$/i, ''),
-                age: '-', education: '-', major: '-', address: '-', experience: 'Tidak terbaca',
-                score: 0, recommendation: 'Error', badgeClass: 'badge-low', reason: 'File tidak bisa dibaca'
-            });
-            continue;
-        }
-        
-        const parsed = parseCV(fileText);
-        console.log(`Parsed ${parsed.name}, calling Groq...`);
-        const { score, reason } = await getMatchScore(fileText, jobTitle, qualification, jobdesc, parsed.name);
-        
-        let recommendation = score >= 85 ? 'High Priority' : (score >= 70 ? 'Layak Interview' : (score >= 50 ? 'Cadangan' : 'Tidak Direkomendasi'));
-        let badgeClass = score >= 85 ? 'badge-high' : (score >= 70 ? 'badge-mid' : 'badge-low');
-        
-        allResults.push({
-            ...parsed,
-            score: score,
-            recommendation: recommendation,
-            badgeClass: badgeClass,
-            reason: reason
-        });
-        
-        if (score > 0) successCount++;
-        await new Promise(r => setTimeout(r, 500)); // delay antar request
+        const text = await readCV(files[i]);
+        if (!text) continue;
+        const parsed = parseCV(text);
+        const { score } = await getMatchScore(text, jobTitle, qualification, jobdesc);
+        let rec = score >= 85 ? 'High Priority' : (score >= 70 ? 'Layak Interview' : 'Cadangan');
+        let badge = score >= 85 ? 'badge-high' : (score >= 70 ? 'badge-mid' : 'badge-low');
+        allResults.push({ ...parsed, score, recommendation: rec, badgeClass: badge });
     }
     
     allResults.sort((a,b) => b.score - a.score);
     renderTable();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('resultCard').style.display = 'block';
-    
-    if (successCount === 0) {
-        alert('Tidak ada CV yang berhasil diproses. Cek koneksi API atau format file.');
-    }
+    showNotification(`Selesai! ${allResults.length} kandidat dianalisis.`);
 }
 
 function renderTable() {
     const tbody = document.getElementById('resultBody');
     tbody.innerHTML = '';
-    allResults.forEach((r, idx) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${idx+1}</td>
-            <td>${r.name}</td>
-            <td>${r.age}</td>
-            <td>${r.education}</td>
-            <td>${r.major}</td>
-            <td>${r.address}</td>
-            <td>${r.experience}</td>
+    allResults.forEach((r, i) => {
+        tbody.innerHTML += `<tr>
+            <td>${i+1}</td>
+            <td>${escapeHtml(r.name)}</td>
+            <td>${escapeHtml(r.age)}</td>
+            <td>${escapeHtml(r.education)}</td>
+            <td>${escapeHtml(r.major)}</td>
+            <td>${escapeHtml(r.address)}</td>
+            <td>${escapeHtml(r.experience.substring(0,100))}</td>
             <td><strong>${r.score}%</strong></td>
             <td><span class="badge ${r.badgeClass}">${r.recommendation}</span></td>
-        `;
-        tbody.appendChild(row);
+        </tr>`;
     });
 }
 
-function resetForm() {
-    document.getElementById('jobTitle').value = '';
-    document.getElementById('department').value = '';
-    document.getElementById('qualification').value = '';
-    document.getElementById('jobdesc').value = '';
-    document.getElementById('cvFiles').value = '';
-    document.getElementById('resultCard').style.display = 'none';
-    allResults = [];
-}
-
+function escapeHtml(str) { return (str || '-').replace(/[&<>]/g, function(m){return m==='&'?'&amp;':m==='<'?'&lt;':'&gt;';}); }
+function resetForm() { location.reload(); }
 function exportToExcel() {
     if (!allResults.length) return alert('Tidak ada data');
-    const exportData = allResults.map((r, i) => ({
-        No: i+1,
-        Nama: r.name,
-        Usia: r.age,
-        Pendidikan: r.education,
-        Jurusan: r.major,
-        Alamat: r.address,
-        Pengalaman: r.experience,
-        Skor: r.score + '%',
-        Rekomendasi: r.recommendation,
-        Alasan: r.reason
-    }));
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    const data = allResults.map((r,i)=>({No:i+1, Nama:r.name, Usia:r.age, Pendidikan:r.education, Jurusan:r.major, Alamat:r.address, Pengalaman:r.experience, Skor:`${r.score}%`, Rekomendasi:r.recommendation}));
+    const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ranking');
-    XLSX.writeFile(wb, `Rexvin_ATS_${new Date().toISOString().slice(0,19)}.xlsx`);
+    XLSX.writeFile(wb, `Rexvin_${Date.now()}.xlsx`);
+    showNotification('Export Excel berhasil');
 }
 
 window.onload = () => {
     if (localStorage.getItem('groq_api_key')) {
-        document.getElementById('apiStatus').innerHTML = '✓ API Key sudah tersimpan';
-        document.getElementById('apiStatus').style.color = '#10b981';
         GROQ_API_KEY = localStorage.getItem('groq_api_key');
+        document.getElementById('apiKey').value = GROQ_API_KEY;
+        showNotification('API Key tersedia. Klik "Simpan Key" untuk verifikasi ulang.');
+    } else {
+        showNotification('Masukkan Groq API Key untuk analisis akurat.');
     }
 };
