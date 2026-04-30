@@ -1,7 +1,7 @@
 // ========== GROQ API ==========
 let GROQ_API_KEY = localStorage.getItem('groq_api_key') || '';
 
-// Fungsi notifikasi
+// Notifikasi
 function showNotification(msg, isError = false) {
     const statusDiv = document.getElementById('apiStatus');
     if (statusDiv) {
@@ -26,7 +26,7 @@ async function testGroqConnection(apiKey) {
                 'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',  // model yang lebih stabil
+                model: 'llama-3.3-70b-versatile',
                 messages: [{ role: 'user', content: 'OK' }],
                 max_tokens: 5
             })
@@ -85,51 +85,99 @@ async function readCV(file) {
     }
 }
 
-// ========== EKSTRAKSI DATA CV ==========
+// ========== PARSE CV (PINTAR) ==========
 function parseCV(text) {
     if (!text) return { name: '-', age: '-', education: '-', major: '-', address: '-', experience: '-' };
-    const clean = text.replace(/\s+/g, ' ').trim();
-    const lower = clean.toLowerCase();
     
+    let clean = text.replace(/[^\w\s\.,\-@\(\)]/g, ' ').replace(/\s+/g, ' ').trim();
+    let lower = clean.toLowerCase();
+    
+    // NAMA
     let name = 'Tidak terdeteksi';
-    const nameMatch = clean.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/);
-    if (nameMatch) name = nameMatch[1];
+    let namaMatch = clean.match(/Nama\s*:?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4})/i);
+    if (namaMatch) name = namaMatch[1];
+    else {
+        let lines = clean.split(/[\.\n]/);
+        for (let line of lines) {
+            line = line.trim();
+            if (line.length > 5 && line.length < 50 && /^[A-Z][a-z]/.test(line) && !line.includes('CV') && !line.includes('CURRICULUM')) {
+                name = line;
+                break;
+            }
+        }
+    }
     
+    // USIA
     let age = '-';
-    const ageMatch = clean.match(/\b(\d{1,2})\s*(tahun|thn|t)\b/i);
+    let ageMatch = clean.match(/(?:umur|usia)\s*:?\s*(\d{1,2})/i);
     if (ageMatch) age = ageMatch[1];
+    else {
+        let birthYear = clean.match(/\b(19[7-9][0-9]|20[0-2][0-9])\b/);
+        if (birthYear) {
+            let tahunLahir = parseInt(birthYear[0]);
+            let now = new Date().getFullYear();
+            let hitung = now - tahunLahir;
+            if (hitung > 15 && hitung < 70) age = hitung.toString();
+        }
+    }
     
+    // PENDIDIKAN
     let edu = '-';
     if (lower.includes('s2') || lower.includes('magister')) edu = 'S2';
     else if (lower.includes('s1') || lower.includes('sarjana')) edu = 'S1';
+    else if (lower.includes('d4')) edu = 'D4';
     else if (lower.includes('d3')) edu = 'D3';
     else if (lower.includes('sma')) edu = 'SMA';
+    else if (lower.includes('smk')) edu = 'SMK';
     
+    // JURUSAN
     let major = '-';
-    const jurusan = ['teknik sipil', 'akuntansi', 'manajemen', 'informatika', 'hukum'];
-    for (let j of jurusan) if (lower.includes(j)) { major = j.toUpperCase(); break; }
+    let jurusanList = ['teknik sipil', 'akuntansi', 'manajemen', 'informatika', 'sistem informasi', 'hukum', 'psikologi', 'arsitektur', 'ekonomi', 'komunikasi'];
+    for (let j of jurusanList) {
+        if (lower.includes(j)) {
+            major = j.toUpperCase();
+            break;
+        }
+    }
+    let jurMatch = clean.match(/jurusan\s*:?\s*([A-Za-z\s]{3,40})/i);
+    if (jurMatch && jurMatch[1].trim().length < 50) major = jurMatch[1].trim();
     
+    // ALAMAT
     let address = '-';
-    const addrMatch = clean.match(/alamat\s*:?\s*([^,\n]+)/i);
-    if (addrMatch) address = addrMatch[1].trim().substring(0, 50);
+    let addrMatch = clean.match(/alamat\s*:?\s*([^,.\n]{10,80})/i);
+    if (addrMatch) address = addrMatch[1].trim();
+    else {
+        let kota = ['jakarta', 'bandung', 'surabaya', 'medan', 'batam', 'padang', 'palembang', 'makassar', 'semarang'];
+        for (let k of kota) {
+            if (lower.includes(k)) {
+                address = k.charAt(0).toUpperCase() + k.slice(1);
+                break;
+            }
+        }
+    }
     
+    // PENGALAMAN
     let expSummary = '-';
-    const expRegex = /([A-Z][a-z\s&]+(?:PT\.?|CV\.?)?)\s*(\d{4})\s*[-–]\s*(\d{4}|sekarang)/gi;
+    let expRegex = /([A-Z][a-z\s&]+(?:PT\.?|CV\.?|Perusahaan)?)\s*(\d{4})\s*[-–]\s*(\d{4}|sekarang)/gi;
     let matches = [...clean.matchAll(expRegex)];
     if (matches.length) {
-        expSummary = matches.slice(0,2).map(m => `${m[1].trim()} (${m[2]}–${m[3]})`).join('; ');
+        expSummary = matches.slice(0, 2).map(m => `${m[1].trim()} (${m[2]}–${m[3]})`).join('; ');
     } else {
-        const idx = lower.indexOf('pengalaman');
-        if (idx !== -1) expSummary = clean.substring(idx, idx+120).replace(/\n/g,' ');
+        let idx = lower.indexOf('pengalaman');
+        if (idx !== -1) expSummary = clean.substring(idx, idx+150).replace(/\n/g,' ');
+        else if (lower.includes('bekerja')) {
+            let idx2 = lower.indexOf('bekerja');
+            expSummary = clean.substring(idx2, idx2+120);
+        }
     }
+    
     return { name, age, education: edu, major, address, experience: expSummary };
 }
 
-// ========== ANALISIS KECOCOKAN PAKAI GROQ ==========
+// ========== ANALISIS KECOCOKAN DENGAN GROQ ==========
 async function getMatchScore(cvText, jobTitle, qualification, jobdesc) {
     if (!GROQ_API_KEY) {
-        showNotification('⚠️ API Key belum disimpan. Skor perkiraan saja.', true);
-        // fallback keyword
+        showNotification('⚠️ API Key belum disimpan. Skor perkiraan.', true);
         const requirement = (qualification + ' ' + jobdesc).toLowerCase();
         const cv = cvText.toLowerCase();
         const keywords = requirement.split(/\s+/).filter(w => w.length > 4);
@@ -145,7 +193,7 @@ Kualifikasi: ${qualification}
 Jobdesc: ${jobdesc}
 
 CV:
-${cvText.substring(0, 2500)}
+${cvText.substring(0, 3000)}
 
 Output HARUS:
 Score: (0-100)
@@ -185,33 +233,54 @@ Alasan: (singkat)`;
     }
 }
 
-// ========== MAIN ANALISIS ==========
+// ========== VARIABEL GLOBAL ==========
 let allResults = [];
 
+// ========== ANALISIS UTAMA ==========
 async function startAnalysis() {
     const jobTitle = document.getElementById('jobTitle').value.trim();
     const qualification = document.getElementById('qualification').value.trim();
     const jobdesc = document.getElementById('jobdesc').value.trim();
     const files = document.getElementById('cvFiles').files;
     
-    if (!jobTitle || !qualification || !jobdesc) return alert('Lengkapi semua data');
-    if (!files.length) return alert('Upload CV');
+    if (!jobTitle || !qualification || !jobdesc) {
+        alert('Lengkapi Nama Posisi, Kualifikasi, dan Job Description');
+        return;
+    }
+    if (!files.length) {
+        alert('Upload minimal 1 CV');
+        return;
+    }
     
-    if (!GROQ_API_KEY) showNotification('API Key belum disimpan, skor kurang akurat', true);
-    else showNotification('Menggunakan Groq API...');
+    if (!GROQ_API_KEY) {
+        showNotification('API Key belum disimpan, skor kurang akurat', true);
+    } else {
+        showNotification('Menggunakan Groq API untuk analisis...');
+    }
     
     document.getElementById('loading').style.display = 'block';
     document.getElementById('resultCard').style.display = 'none';
     allResults = [];
     
     for (let i = 0; i < files.length; i++) {
-        const text = await readCV(files[i]);
-        if (!text) continue;
+        const file = files[i];
+        showNotification(`Membaca ${file.name}...`);
+        const text = await readCV(file);
+        if (!text || text.length < 30) {
+            console.warn(`Gagal baca ${file.name}`);
+            continue;
+        }
         const parsed = parseCV(text);
         const { score } = await getMatchScore(text, jobTitle, qualification, jobdesc);
         let rec = score >= 85 ? 'High Priority' : (score >= 70 ? 'Layak Interview' : 'Cadangan');
         let badge = score >= 85 ? 'badge-high' : (score >= 70 ? 'badge-mid' : 'badge-low');
         allResults.push({ ...parsed, score, recommendation: rec, badgeClass: badge });
+    }
+    
+    if (allResults.length === 0) {
+        showNotification('Tidak ada CV yang berhasil dibaca', true);
+        document.getElementById('loading').style.display = 'none';
+        return;
     }
     
     allResults.sort((a,b) => b.score - a.score);
@@ -239,22 +308,56 @@ function renderTable() {
     });
 }
 
-function escapeHtml(str) { return (str || '-').replace(/[&<>]/g, function(m){return m==='&'?'&amp;':m==='<'?'&lt;':'&gt;';}); }
-function resetForm() { location.reload(); }
+function escapeHtml(str) {
+    if (!str) return '-';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
+
+function resetForm() {
+    document.getElementById('jobTitle').value = '';
+    document.getElementById('department').value = '';
+    document.getElementById('qualification').value = '';
+    document.getElementById('jobdesc').value = '';
+    document.getElementById('cvFiles').value = '';
+    document.getElementById('resultCard').style.display = 'none';
+    allResults = [];
+    showNotification('Form direset');
+}
+
 function exportToExcel() {
-    if (!allResults.length) return alert('Tidak ada data');
-    const data = allResults.map((r,i)=>({No:i+1, Nama:r.name, Usia:r.age, Pendidikan:r.education, Jurusan:r.major, Alamat:r.address, Pengalaman:r.experience, Skor:`${r.score}%`, Rekomendasi:r.recommendation}));
+    if (!allResults.length) {
+        alert('Tidak ada data');
+        return;
+    }
+    const data = allResults.map((r,i) => ({
+        No: i+1,
+        Nama: r.name,
+        Usia: r.age,
+        Pendidikan: r.education,
+        Jurusan: r.major,
+        Alamat: r.address,
+        Pengalaman: r.experience,
+        Skor: `${r.score}%`,
+        Rekomendasi: r.recommendation
+    }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ranking');
-    XLSX.writeFile(wb, `Rexvin_${Date.now()}.xlsx`);
+    XLSX.writeFile(wb, `Rexvin_ATS_${Date.now()}.xlsx`);
     showNotification('Export Excel berhasil');
 }
 
+// Inisialisasi saat halaman dimuat
 window.onload = () => {
     if (localStorage.getItem('groq_api_key')) {
         GROQ_API_KEY = localStorage.getItem('groq_api_key');
-        document.getElementById('apiKey').value = GROQ_API_KEY;
+        const inputKey = document.getElementById('apiKey');
+        if (inputKey) inputKey.value = GROQ_API_KEY;
         showNotification('API Key tersedia. Klik "Simpan Key" untuk verifikasi ulang.');
     } else {
         showNotification('Masukkan Groq API Key untuk analisis akurat.');
