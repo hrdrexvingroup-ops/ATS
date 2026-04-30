@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rexvin ATS - Smart CV Matcher</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <div class="logo"><i class="fas fa-brain"></i> Rexvin ATS</div>
+        <div class="subtitle">Smart CV Matcher · AI Powered</div>
+    </header>
+
+    <!-- Step 1: Groq API Key -->
+    <div class="card">
+        <div class="card-header"><i class="fas fa-key"></i> 1. Groq API Key (Gratis)</div>
+        <div class="card-body">
+            <div class="form-group">
+                <label>Masukkan Groq API Key</label>
+                <input type="password" id="apiKey" placeholder="gsk_xxxx...">
+                <button class="btn btn-sm" onclick="saveApiKey()">Simpan Key</button>
+                <div id="apiStatus" class="status-msg"></div>
+                <small>🔑 Dapatkan key gratis di <a href="https://console.groq.com" target="_blank">console.groq.com</a></small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2: Hiring Requirement -->
+    <div class="card">
+        <div class="card-header"><i class="fas fa-clipboard-list"></i> 2. Kualifikasi & Job Description</div>
+        <div class="card-body">
+            <div class="form-row">
+                <div class="form-group"><label>Nama Posisi</label><input type="text" id="jobTitle" placeholder="Contoh: Finance Staff"></div>
+                <div class="form-group"><label>Departemen</label><input type="text" id="department" placeholder="Contoh: Finance & Accounting"></div>
+            </div>
+            <div class="form-group"><label>Kualifikasi yang Dibutuhkan</label><textarea id="qualification" rows="3" placeholder="Pendidikan minimal S1 Akuntansi, pengalaman 2 tahun, menguasai Excel, dll"></textarea></div>
+            <div class="form-group"><label>Job Description / Tanggung Jawab</label><textarea id="jobdesc" rows="5" placeholder="Membuat laporan keuangan, budgeting, dll"></textarea></div>
+        </div>
+    </div>
+
+    <!-- Step 3: Upload CV -->
+    <div class="card">
+        <div class="card-header"><i class="fas fa-upload"></i> 3. Upload CV Kandidat (PDF / Word)</div>
+        <div class="card-body">
+            <input type="file" id="cvFiles" multiple accept=".pdf,.docx,.doc">
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="startAnalysis()"><i class="fas fa-chart-line"></i> Analisis Kecocokan</button>
+                <button class="btn btn-secondary" onclick="resetForm()"><i class="fas fa-undo"></i> Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div class="loading" id="loading" style="display:none"><div class="spinner"></div><p>AI membaca CV & mencocokkan...</p></div>
+
+    <!-- Hasil -->
+    <div class="card" id="resultCard" style="display:none">
+        <div class="card-header"><i class="fas fa-trophy"></i> 4. Hasil Ranking Kandidat <button class="btn btn-success btn-sm" onclick="exportToExcel()"><i class="fas fa-file-excel"></i> Export Excel</button></div>
+        <div class="table-container">
+            <table id="resultTable">
+                <thead>
+                    <tr><th>#</th><th>Nama</th><th>Usia</th><th>Pendidikan</th><th>Jurusan</th><th>Alamat</th><th>Ringkasan Pengalaman</th><th>Skor</th><th>Rekomendasi</th></tr>
+                </thead>
+                <tbody id="resultBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer>Rexvin ATS — HRD Professional Tool | AI Candidate Matching</footer>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
