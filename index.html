@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CV Matching System (ATS) - Advanced</title>
+    <title>CV Matching System (ATS) - Fixed</title>
     
     <!-- External Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -611,6 +611,11 @@
             color: var(--danger);
         }
 
+        .api-key-status.warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
         .status-dot {
             display: inline-block;
             width: 6px;
@@ -648,41 +653,24 @@
             }
         }
 
-        /* Debug Panel */
-        .debug-panel {
-            background: rgba(30, 41, 59, 0.8);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 15px;
-            margin-top: 20px;
-            max-height: 300px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
+        /* Status Banner */
+        .status-banner {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-left: 4px solid var(--warning);
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 13px;
             color: var(--text-secondary);
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
         }
 
-        .debug-title {
-            font-weight: 600;
-            color: var(--primary);
-            margin-bottom: 10px;
-        }
-
-        .debug-item {
-            margin-bottom: 8px;
-            padding: 8px;
-            background: rgba(15, 23, 42, 0.5);
-            border-left: 2px solid var(--accent-1);
-            padding-left: 10px;
-        }
-
-        .debug-label {
-            color: var(--accent-1);
-            font-weight: 600;
-        }
-
-        .debug-value {
-            color: var(--text-primary);
+        .status-banner i {
+            flex-shrink: 0;
+            margin-top: 2px;
         }
     </style>
 </head>
@@ -735,12 +723,12 @@
                 <div class="card" style="margin-top: 20px;">
                     <div class="card-title">
                         <i class="fas fa-key"></i>
-                        Konfigurasi Groq API
+                        Konfigurasi Groq API (Optional)
                     </div>
 
-                    <div id="apiKeyStatus" class="api-key-status error">
+                    <div id="apiKeyStatus" class="api-key-status warning">
                         <span class="status-dot"></span>
-                        Belum terhubung
+                        Mode Fallback (Keyword Scoring)
                     </div>
 
                     <div class="form-group">
@@ -759,7 +747,7 @@
                     </div>
 
                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
-                        <i class="fas fa-lock"></i> API Key aman di localStorage
+                        <i class="fas fa-info-circle"></i> Sistem dapat berjalan TANPA API Key menggunakan keyword-based scoring
                     </p>
                 </div>
             </div>
@@ -800,11 +788,6 @@
                             Export
                         </button>
                     </div>
-
-                    <label style="margin-top: 20px; display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" id="debugMode" onchange="toggleDebugMode()">
-                        <span style="font-size: 12px; color: var(--text-secondary);">Debug Mode (Lihat parsing details)</span>
-                    </label>
                 </div>
             </div>
         </div>
@@ -851,10 +834,9 @@
         // ==========================================
         // CONFIGURATION & CONSTANTS
         // ==========================================
-        pdfjsWorker.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
         const CONFIG = {
-            DEBUG: false,
             MAX_FILES: 10,
             MAX_FILE_SIZE: 10 * 1024 * 1024,
             MIN_NAME_LENGTH: 3,
@@ -891,8 +873,7 @@
             uploadedFiles: [],
             analysisResults: [],
             apiKey: localStorage.getItem('groq_api_key') || '',
-            apiConnected: false,
-            debugLogs: []
+            apiConnected: false
         };
 
         // ==========================================
@@ -902,6 +883,7 @@
             initializeEventListeners();
             loadApiKey();
             setupDragAndDrop();
+            console.log('[INIT] CV Matching System initialized');
         });
 
         function initializeEventListeners() {
@@ -912,7 +894,7 @@
         function loadApiKey() {
             if (appState.apiKey) {
                 document.getElementById('apiKey').value = '••••••••••••••••';
-                updateApiKeyStatus(true);
+                testApiConnection();
             }
         }
 
@@ -935,21 +917,6 @@
                 fileInput.files = e.dataTransfer.files;
                 handleFileSelection();
             });
-        }
-
-        // ==========================================
-        // DEBUG SYSTEM
-        // ==========================================
-        function toggleDebugMode() {
-            CONFIG.DEBUG = document.getElementById('debugMode').checked;
-        }
-
-        function debug(label, value) {
-            if (!CONFIG.DEBUG) return;
-            
-            const log = { label, value, timestamp: new Date().toLocaleTimeString() };
-            appState.debugLogs.push(log);
-            console.log(`[DEBUG] ${label}:`, value);
         }
 
         // ==========================================
@@ -992,20 +959,23 @@
                 const response = await fetch('https://api.groq.com/openai/v1/models', {
                     headers: {
                         'Authorization': `Bearer ${appState.apiKey}`
-                    }
+                    },
+                    timeout: 5000
                 });
 
                 if (response.ok) {
                     appState.apiConnected = true;
                     updateApiKeyStatus(true);
-                    showToast('API Groq berhasil terhubung!', 'success');
+                    showToast('✓ API Groq berhasil terhubung!', 'success');
+                    console.log('[API] Groq API connection successful');
                 } else {
-                    throw new Error('API Key tidak valid');
+                    throw new Error(`API responded with ${response.status}`);
                 }
             } catch (error) {
                 appState.apiConnected = false;
                 updateApiKeyStatus(false);
-                showToast('Koneksi API gagal. Menggunakan scoring keyword.', 'warning');
+                console.warn('[API] Connection failed:', error.message);
+                showToast('⚠ API gagal, menggunakan fallback scoring', 'warning');
             } finally {
                 showLoading(false);
             }
@@ -1015,10 +985,10 @@
             const statusEl = document.getElementById('apiKeyStatus');
             if (connected) {
                 statusEl.className = 'api-key-status';
-                statusEl.innerHTML = '<span class="status-dot"></span> API Groq Terhubung';
+                statusEl.innerHTML = '<span class="status-dot"></span> ✓ API Groq Terhubung (AI Scoring)';
             } else {
-                statusEl.className = 'api-key-status error';
-                statusEl.innerHTML = '<span class="status-dot"></span> Mode Fallback (Keyword)';
+                statusEl.className = 'api-key-status warning';
+                statusEl.innerHTML = '<span class="status-dot"></span> ⚠ Fallback Mode (Keyword Scoring)';
             }
         }
 
@@ -1045,7 +1015,8 @@
                 jobDescription: document.getElementById('jobDescription').value.trim()
             };
 
-            showToast(`Job info disimpan: "${positionName}"`, 'success');
+            showToast(`✓ Job info disimpan: "${positionName}"`, 'success');
+            console.log('[JOB] Job info validated:', appState.jobInfo);
         }
 
         // ==========================================
@@ -1074,7 +1045,7 @@
                     return false;
                 }
                 if (file.size > CONFIG.MAX_FILE_SIZE) {
-                    showToast(`File "${file.name}" terlalu besar`, 'error');
+                    showToast(`File "${file.name}" terlalu besar (max 10MB)`, 'error');
                     return false;
                 }
                 return true;
@@ -1082,6 +1053,7 @@
 
             appState.uploadedFiles = validFiles;
             updateFileList();
+            console.log(`[FILES] ${validFiles.length} file(s) selected`);
         }
 
         function updateFileList() {
@@ -1121,8 +1093,8 @@
                     return await extractDocxText(file);
                 }
             } catch (error) {
-                console.error(`Error extracting ${file.name}:`, error);
-                throw new Error(`Gagal membaca file ${file.name}`);
+                console.error(`[EXTRACT] Error in ${file.name}:`, error);
+                throw new Error(`Gagal membaca ${file.name}: ${error.message}`);
             }
         }
 
@@ -1134,7 +1106,7 @@
             for (let i = 1; i <= pdf.numPages; i++) {
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
-                text += textContent.items.map(item => item.str).join(' ');
+                text += textContent.items.map(item => item.str).join(' ') + ' ';
             }
 
             return text;
@@ -1150,8 +1122,6 @@
         // ADVANCED CV PARSING ENGINE
         // ==========================================
         function parseCV(text, fileName) {
-            debug('Raw Text Length', text.length);
-            
             const cvData = {
                 fileName: fileName,
                 name: extractNameAdvanced(text),
@@ -1159,57 +1129,36 @@
                 education: extractEducationAdvanced(text),
                 major: extractMajorAdvanced(text),
                 address: extractAddressAdvanced(text),
-                experience: extractExperienceAdvanced(text),
-                confidenceScores: {}
+                experience: extractExperienceAdvanced(text)
             };
 
-            // Hitung confidence untuk setiap field
-            cvData.confidenceScores = {
-                name: calculateNameConfidence(text, cvData.name),
-                age: calculateAgeConfidence(text, cvData.age),
-                education: calculateEducationConfidence(text, cvData.education),
-                major: calculateMajorConfidence(text, cvData.major),
-                address: calculateAddressConfidence(text, cvData.address)
-            };
-
-            debug('Parsed CV Data', cvData);
+            console.log(`[PARSE] ${fileName}:`, cvData);
             return cvData;
         }
 
-        // ===== NAME EXTRACTION (ULTRA ADVANCED) =====
+        // ===== NAME EXTRACTION =====
         function extractNameAdvanced(text) {
             const lines = text.split('\n').map(l => l.trim()).filter(l => l);
 
-            // Strategy 1: Pattern "Nama: ..." atau "Name: ..."
             const namaPattern = /(?:nama|name|full\s+name)\s*[:=]\s*([^\n,]+)/i;
             const namaMatch = text.match(namaPattern);
             if (namaMatch) {
                 const name = sanitizeName(namaMatch[1]);
                 if (isValidName(name)) {
-                    debug('Name Strategy 1', `Found via pattern: ${name}`);
                     return name;
                 }
             }
 
-            // Strategy 2: Scan sebelum section headers (BEST untuk ATS & unstructured)
             const sectionHeaderPattern = /^(SUMMARY|OBJECTIVE|RIWAYAT|PENGALAMAN|EXPERIENCE|EDUCATION|PENDIDIKAN|SKILL|KEAHLIAN|SERTIFIKASI|CONTACT|KONTAK|PORTOFOLIO|PORTFOLIO|PROJECT|PROYEK|TECHNICAL|BAHASA|LANGUAGE)/i;
             
-            let candidateNames = [];
             for (let i = 0; i < Math.min(50, lines.length); i++) {
                 const line = lines[i];
                 if (sectionHeaderPattern.test(line)) break;
                 if (isValidNameCandidate(line)) {
-                    candidateNames.push(line);
+                    return line;
                 }
             }
 
-            if (candidateNames.length > 0) {
-                const bestName = candidateNames[0];
-                debug('Name Strategy 2', `Found via section scan: ${bestName}`);
-                return bestName;
-            }
-
-            // Strategy 3: Score-based approach untuk 20 baris pertama
             let scoredNames = [];
             for (let i = 0; i < Math.min(20, lines.length); i++) {
                 const line = lines[i];
@@ -1221,31 +1170,24 @@
 
             if (scoredNames.length > 0) {
                 scoredNames.sort((a, b) => b.score - a.score);
-                const bestName = scoredNames[0].line;
-                debug('Name Strategy 3', `Found via scoring (score: ${scoredNames[0].score}): ${bestName}`);
-                return bestName;
+                return scoredNames[0].line;
             }
 
-            // Strategy 4: Fallback - ambil baris pertama yang valid
             for (let i = 0; i < Math.min(10, lines.length); i++) {
                 const line = lines[i];
                 if (isValidName(line)) {
-                    debug('Name Strategy 4', `Fallback: ${line}`);
                     return line;
                 }
             }
 
-            debug('Name Strategy 5', 'No name found, returning N/A');
             return 'N/A';
         }
 
         function isValidNameCandidate(line) {
             if (line.length < 3 || line.length > 100) return false;
             if (line.includes('@') || line.includes('http') || line.includes('www')) return false;
-            if (/^\d+[-\s]?\d+/.test(line)) return false; // Phone number
+            if (/^\d+[-\s]?\d+/.test(line)) return false;
             if (line.toLowerCase().includes('cv') || line.toLowerCase().includes('resume')) return false;
-            
-            // Harus ada minimal 1 uppercase dan 1 lowercase
             if (!/[A-Z]/.test(line) || !/[a-z]/.test(line)) return false;
             
             const wordCount = line.split(/\s+/).length;
@@ -1272,7 +1214,7 @@
             let score = 0;
             if (!isValidNameCandidate(line)) return 0;
 
-            score += 50; // Base score
+            score += 50;
 
             if (/^[A-Z][a-z]+(\s+[A-Z][a-z]+)*$/.test(line)) score += 30;
 
@@ -1286,26 +1228,17 @@
             return Math.max(0, score);
         }
 
-        function calculateNameConfidence(text, name) {
-            if (name === 'N/A') return 0;
-            const pattern = new RegExp(`\\b${name.replace(/\s+/g, '\\s+')}\\b`, 'i');
-            return pattern.test(text) ? 95 : 60;
-        }
-
-        // ===== AGE EXTRACTION (INTELLIGENT) =====
+        // ===== AGE EXTRACTION =====
         function extractAgeAdvanced(text) {
-            // Strategy 1: Direct age mention "Usia: 28" atau "Age: 30"
-            const ageDirectPattern = /(?:umur|usia|age|thn|tahun)\s*[:=]?\s*(\d+)\s*(?:thn|tahun|tahun|years|yr)?/i;
+            const ageDirectPattern = /(?:umur|usia|age|thn|tahun)\s*[:=]?\s*(\d+)\s*(?:thn|tahun|years|yr)?/i;
             const ageMatch = text.match(ageDirectPattern);
             if (ageMatch) {
                 const age = parseInt(ageMatch[1]);
                 if (age >= CONFIG.AGE_MIN && age <= CONFIG.AGE_MAX) {
-                    debug('Age Strategy 1', `Direct match: ${age}`);
                     return age;
                 }
             }
 
-            // Strategy 2: Date of birth patterns
             const datePatterns = [
                 /(?:tanggal\s+lahir|date\s+of\s+birth|dob|lahir)\s*[:=]?\s*(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/i,
                 /(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/
@@ -1318,31 +1251,13 @@
                     if (year >= 1950 && year <= 2010) {
                         const age = new Date().getFullYear() - year;
                         if (age >= CONFIG.AGE_MIN && age <= CONFIG.AGE_MAX) {
-                            debug('Age Strategy 2', `From birthdate: ${age}`);
                             return age;
                         }
                     }
                 }
             }
 
-            // Strategy 3: Context-based extraction "Berusia 25 tahun"
-            const contextPattern = /berusia\s+(\d+)\s*(?:tahun)?/i;
-            const contextMatch = text.match(contextPattern);
-            if (contextMatch) {
-                const age = parseInt(contextMatch[1]);
-                if (age >= CONFIG.AGE_MIN && age <= CONFIG.AGE_MAX) {
-                    debug('Age Strategy 3', `Context-based: ${age}`);
-                    return age;
-                }
-            }
-
-            debug('Age Strategy 4', 'No age found');
             return 'N/A';
-        }
-
-        function calculateAgeConfidence(text, age) {
-            if (age === 'N/A') return 0;
-            return 90; // Jika ada, confidence tinggi
         }
 
         // ===== EDUCATION EXTRACTION =====
@@ -1351,135 +1266,106 @@
 
             for (const edu of COMMON_EDUCATION) {
                 if (normalized.includes(edu.toLowerCase())) {
-                    debug('Education Found', edu);
                     return edu;
                 }
             }
 
-            debug('Education', 'Not found, returning N/A');
             return 'N/A';
-        }
-
-        function calculateEducationConfidence(text, edu) {
-            if (edu === 'N/A') return 0;
-            const count = (text.match(new RegExp(edu, 'gi')) || []).length;
-            return Math.min(100, 70 + (count * 10));
         }
 
         // ===== MAJOR EXTRACTION =====
         function extractMajorAdvanced(text) {
             const normalized = text.toLowerCase();
 
-            // Strategy 1: Direct keyword matching
             for (const major of MAJOR_KEYWORDS) {
                 if (normalized.includes(major.toLowerCase())) {
-                    debug('Major Strategy 1', major);
                     return major.toUpperCase();
                 }
             }
 
-            // Strategy 2: Pattern "Jurusan: ..." atau "Prodi: ..."
             const majorPattern = /(?:jurusan|prodi|program\s+studi|major|specialization)\s*[:=]?\s*([^\n,]+)/i;
             const majorMatch = text.match(majorPattern);
             if (majorMatch) {
                 const major = majorMatch[1].trim();
                 if (major.length > 2 && major.length < 100) {
-                    debug('Major Strategy 2', major);
                     return major.toUpperCase();
                 }
             }
 
-            debug('Major', 'Not found');
             return 'N/A';
-        }
-
-        function calculateMajorConfidence(text, major) {
-            if (major === 'N/A') return 0;
-            return 75;
         }
 
         // ===== ADDRESS EXTRACTION =====
         function extractAddressAdvanced(text) {
-            // Strategy 1: City matching
             const normalized = text.toLowerCase();
             for (const city of CITY_KEYWORDS) {
                 if (normalized.includes(city)) {
-                    debug('Address Strategy 1', city);
                     return city.charAt(0).toUpperCase() + city.slice(1);
                 }
             }
 
-            // Strategy 2: Pattern "Alamat: ..." atau "Address: ..."
             const addressPattern = /(?:alamat|address|kota|city)\s*[:=]?\s*([^\n,]+)/i;
             const addressMatch = text.match(addressPattern);
             if (addressMatch) {
                 const address = addressMatch[1].trim();
                 if (address.length > 2 && address.length < 100) {
-                    debug('Address Strategy 2', address);
                     return address;
                 }
             }
 
-            debug('Address', 'Not found');
             return 'N/A';
-        }
-
-        function calculateAddressConfidence(text, address) {
-            if (address === 'N/A') return 0;
-            return 70;
         }
 
         // ===== EXPERIENCE EXTRACTION =====
         function extractExperienceAdvanced(text) {
-            // Strategy 1: Pattern "Perusahaan (tahun-tahun)"
             const companyPattern = /([A-Z][a-zA-Z\s&.,-]+?)\s*\((\d{4})\s*[-–]\s*(\d{4}|sekarang|present|now)\)/;
             const companyMatch = text.match(companyPattern);
             if (companyMatch) {
-                const experience = `${companyMatch[1].trim()} (${companyMatch[2]}-${companyMatch[3]})`;
-                debug('Experience Strategy 1', experience);
-                return experience;
+                return `${companyMatch[1].trim()} (${companyMatch[2]}-${companyMatch[3]})`;
             }
 
-            // Strategy 2: Pattern "Pengalaman: ..." atau "Experience: ..."
             const expPattern = /(?:pengalaman|experience|riwayat\s+pekerjaan)\s*[:=]?\s*([^\n]+)/i;
             const expMatch = text.match(expPattern);
             if (expMatch) {
                 const exp = expMatch[1].trim();
                 if (exp.length > 2) {
-                    debug('Experience Strategy 2', exp);
                     return exp;
                 }
             }
 
-            // Strategy 3: Cari baris dengan tahun (pattern: 2020-2023)
             const yearPattern = /(\d{4})\s*[-–]\s*(\d{4})/;
             const yearMatch = text.match(yearPattern);
             if (yearMatch) {
                 const fullContext = text.split('\n').find(line => line.match(yearPattern));
                 if (fullContext) {
-                    debug('Experience Strategy 3', fullContext);
                     return fullContext.trim().substring(0, 100);
                 }
             }
 
-            debug('Experience', 'Not found');
             return 'N/A';
         }
 
         // ==========================================
-        // SCORING SYSTEM
+        // SCORING SYSTEM (FIXED ASYNC/AWAIT)
         // ==========================================
         async function scoreCandidate(cvData, jobInfo) {
-            if (appState.apiConnected && appState.apiKey) {
-                return await scoreWithGroq(cvData, jobInfo);
-            } else {
+            try {
+                if (appState.apiConnected && appState.apiKey) {
+                    console.log(`[SCORE] Attempting Groq API for: ${cvData.name}`);
+                    return await scoreWithGroq(cvData, jobInfo);
+                } else {
+                    console.log(`[SCORE] Using fallback scoring for: ${cvData.name}`);
+                    return scoreWithKeywords(cvData, jobInfo);
+                }
+            } catch (error) {
+                console.error(`[SCORE] Unexpected error:`, error);
+                console.log(`[SCORE] Falling back to keyword scoring`);
                 return scoreWithKeywords(cvData, jobInfo);
             }
         }
 
         async function scoreWithGroq(cvData, jobInfo) {
-            const prompt = `
-Anda adalah HR Expert. Berikan skor kecocokan CV dengan requirement pekerjaan.
+            const prompt = `Anda adalah HR Expert. Berikan skor kecocokan CV dengan requirement pekerjaan.
 
 KANDIDAT:
 - Nama: ${cvData.name}
@@ -1513,17 +1399,25 @@ SKOR:`;
                     })
                 });
 
-                if (!response.ok) throw new Error('API request failed');
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(`API error ${response.status}: ${errorData.error?.message || 'Unknown'}`);
+                }
 
                 const data = await response.json();
-                const content = data.choices[0].message.content.trim();
+                const content = data.choices?.[0]?.message?.content?.trim() || '';
                 const scoreMatch = content.match(/(\d+)/);
-                const score = scoreMatch ? Math.min(100, Math.max(0, parseInt(scoreMatch[1]))) : scoreWithKeywords(cvData, jobInfo);
+                const score = scoreMatch ? Math.min(100, Math.max(0, parseInt(scoreMatch[1]))) : null;
 
-                debug('Groq Score', score);
+                if (score === null) {
+                    console.warn('[SCORE] No valid score extracted from Groq, falling back');
+                    return scoreWithKeywords(cvData, jobInfo);
+                }
+
+                console.log(`[SCORE] Groq score for ${cvData.name}: ${score}`);
                 return score;
             } catch (error) {
-                console.warn('Groq API failed:', error);
+                console.warn('[SCORE] Groq API failed:', error.message);
                 return scoreWithKeywords(cvData, jobInfo);
             }
         }
@@ -1535,29 +1429,41 @@ SKOR:`;
 
             // Education scoring (40 points)
             if (cvData.education !== 'N/A') {
-                score += (EDUCATION_LEVELS[cvData.education] || 0.3) * 40;
+                const eduScore = (EDUCATION_LEVELS[cvData.education] || 0.3) * 40;
+                score += eduScore;
+                console.log(`  - Education (${cvData.education}): +${eduScore.toFixed(1)}`);
             }
 
             // Major relevance (30 points)
             if (cvData.major !== 'N/A') {
                 const majorWords = cvData.major.toLowerCase().split(/\s+/);
                 const matchCount = majorWords.filter(word => word.length > 2 && requirements.includes(word)).length;
-                score += Math.min(30, matchCount * 10);
+                const majorScore = Math.min(30, matchCount * 10);
+                score += majorScore;
+                console.log(`  - Major (${cvData.major}): +${majorScore}`);
             }
 
             // Experience relevance (20 points)
             if (cvData.experience !== 'N/A') {
                 const expWords = cvData.experience.toLowerCase().split(/\s+/);
                 const matchCount = expWords.filter(word => word.length > 3 && requirements.includes(word)).length;
-                score += Math.min(20, matchCount * 5);
+                const expScore = Math.min(20, matchCount * 5);
+                score += expScore;
+                console.log(`  - Experience: +${expScore}`);
             }
 
-            // Address (10 points)
-            if (cvData.address !== 'N/A') score += 5;
-            if (cvData.age !== 'N/A') score += 5;
+            // Bonus points
+            if (cvData.address !== 'N/A') {
+                score += 5;
+                console.log(`  - Address: +5`);
+            }
+            if (cvData.age !== 'N/A') {
+                score += 5;
+                console.log(`  - Age: +5`);
+            }
 
             const finalScore = Math.round(Math.min(100, score));
-            debug('Keyword Score', finalScore);
+            console.log(`[SCORE] Keyword score for ${cvData.name}: ${finalScore}`);
             return finalScore;
         }
 
@@ -1572,18 +1478,18 @@ SKOR:`;
         // ==========================================
         async function startAnalysis() {
             if (!appState.jobInfo) {
-                showToast('Lengkapi informasi posisi terlebih dahulu', 'error');
+                showToast('❌ Lengkapi informasi posisi terlebih dahulu', 'error');
                 return;
             }
 
             if (appState.uploadedFiles.length === 0) {
-                showToast('Upload minimal 1 file CV', 'error');
+                showToast('❌ Upload minimal 1 file CV', 'error');
                 return;
             }
 
             appState.analysisResults = [];
-            appState.debugLogs = [];
             const totalFiles = appState.uploadedFiles.length;
+            let successCount = 0;
 
             for (let i = 0; i < totalFiles; i++) {
                 const file = appState.uploadedFiles[i];
@@ -1595,23 +1501,36 @@ SKOR:`;
                     const cvData = parseCV(text, file.name);
                     const score = await scoreCandidate(cvData, appState.jobInfo);
 
-                    appState.analysisResults.push({
-                        fileName: file.name,
-                        ...cvData,
-                        score: score,
-                        recommendation: getRecommendation(score)
-                    });
+                    // CRITICAL FIX: Ensure score is a number
+                    if (typeof score !== 'number' || isNaN(score)) {
+                        console.warn(`[ANALYSIS] Invalid score (${typeof score}), defaulting to 0`);
+                        appState.analysisResults.push({
+                            fileName: file.name,
+                            ...cvData,
+                            score: 0,
+                            recommendation: 'Cadangan'
+                        });
+                    } else {
+                        appState.analysisResults.push({
+                            fileName: file.name,
+                            ...cvData,
+                            score: score,
+                            recommendation: getRecommendation(score)
+                        });
+                        successCount++;
+                    }
 
                     showToast(`✓ ${file.name}`, 'success');
                 } catch (error) {
                     showToast(`✗ ${file.name}: ${error.message}`, 'error');
-                    console.error(error);
+                    console.error('[ANALYSIS] Error:', error);
                 }
             }
 
             showLoading(false);
             sortAndDisplayResults();
-            showToast(`Analisis selesai! ${appState.analysisResults.length}/${totalFiles} CV berhasil.`, 'success');
+            showToast(`✓ Analisis selesai! ${successCount}/${totalFiles} CV berhasil.`, 'success');
+            console.log(`[ANALYSIS] Complete: ${successCount}/${totalFiles} successful`);
         }
 
         function sortAndDisplayResults() {
@@ -1687,22 +1606,6 @@ SKOR:`;
 
             container.innerHTML = '';
             container.appendChild(wrapper);
-
-            // Debug panel jika mode debug aktif
-            if (CONFIG.DEBUG && appState.debugLogs.length > 0) {
-                const debugPanel = document.createElement('div');
-                debugPanel.className = 'debug-panel';
-                debugPanel.innerHTML = `
-                    <div class="debug-title">📊 Debug Logs (${appState.debugLogs.length} entries)</div>
-                    ${appState.debugLogs.map(log => `
-                        <div class="debug-item">
-                            <span class="debug-label">${log.label}:</span>
-                            <span class="debug-value">${JSON.stringify(log.value)}</span>
-                        </div>
-                    `).join('')}
-                `;
-                container.appendChild(debugPanel);
-            }
         }
 
         function getRecommendationClass(rec) {
@@ -1716,7 +1619,7 @@ SKOR:`;
         // ==========================================
         function exportToExcel() {
             if (appState.analysisResults.length === 0) {
-                showToast('Tidak ada data untuk diekspor', 'error');
+                showToast('❌ Tidak ada data untuk diekspor', 'error');
                 return;
             }
 
@@ -1741,7 +1644,7 @@ SKOR:`;
             const fileName = `CV_Ranking_${appState.jobInfo.position.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
             XLSX.writeFile(wb, fileName);
 
-            showToast(`Export: ${fileName}`, 'success');
+            showToast(`✓ Export: ${fileName}`, 'success');
         }
 
         // ==========================================
@@ -1774,14 +1677,13 @@ SKOR:`;
         }
 
         function resetForm() {
-            if (confirm('Reset semua data CV? (Requirement & API Key akan tetap tersimpan)')) {
+            if (confirm('Reset semua data CV? (Requirement akan tetap tersimpan)')) {
                 document.getElementById('cvFiles').value = '';
                 appState.uploadedFiles = [];
                 appState.analysisResults = [];
-                appState.debugLogs = [];
                 updateFileList();
                 displayResults();
-                showToast('Form direset', 'info');
+                showToast('✓ Form direset', 'info');
             }
         }
     </script>
